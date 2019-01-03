@@ -155,6 +155,25 @@ DWORD WINAPI AudioThread(LPVOID lpParam) {
     return 0;
 }
 
+#define BUF_SIZE (1024 * 16)
+char vert_file[BUF_SIZE];
+char frag_file[BUF_SIZE];
+
+GLuint reload_program(GLuint old_program, HANDLE vert_fd, HANDLE frag_fd) {
+	glDeleteProgram(old_program);
+	for (int i = 0; i < BUF_SIZE; i++) {
+		vert_file[i] = 0;
+		frag_file[i] = 0;
+	}
+
+	OVERLAPPED ol = {0};
+	ReadFileEx(vert_fd, vert_file, BUF_SIZE - 1, &ol, NULL);
+	ReadFileEx(frag_fd, frag_file, BUF_SIZE - 1, &ol, NULL);
+
+    GLuint program = load_and_build_program(vert_file, frag_file);
+	return program;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     WNDCLASS wc;
 
@@ -164,7 +183,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wc.hInstance = hPrevInstance;
     wc.lpszClassName = "test raw";
 
-    static RECT rec = {0, 0, 800, 600};
+    static RECT rec = {0, 0, 1280, 720};
     const static PIXELFORMATDESCRIPTOR pfd = {
         sizeof(PIXELFORMATDESCRIPTOR), 
         1, 
@@ -172,13 +191,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         PFD_TYPE_RGBA,
         16, 
         0, 0, 0, 0, 0, 0,
-        0, 
-        0, 
-        0, 
+        0, 0, 0, 
         0, 0, 0, 0,
         16,
-        0,
-        0,
+        0, 0,
         PFD_MAIN_PLANE,
         0, 0, 0, 0 
     };
@@ -206,43 +222,42 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     printf("GL_VERSION: %s\n", gl_version);
 #endif //DEBUG
 
-    char *vert_file = 
-#include "test.vert"
-    ;
-    char *frag_file = 
-#include "test.frag"
-    ;
+#define VERT_FILE "test.vert"
+#define FRAG_FILE "test.frag"
 
-    GLuint program = load_and_build_program(vert_file, frag_file);
-    glUseProgram(program);
+	GLuint vao, vbo;
+	const float vert_buff[] = {
+		-1.0f,  1.0f,
+		 1.0f,  1.0f,
+		 1.0f, -1.0f,
 
-    GLuint vao;
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
-
-    float vert_buff[] = {
-        -1.0f,  1.0f,
-         1.0f,  1.0f,
-         1.0f, -1.0f,
-
-         1.0f, -1.0f,
-        -1.0f, -1.0f,
-        -1.0f,  1.0f,
-    };
-
-    GLuint vbo;
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vert_buff), vert_buff, GL_STATIC_DRAW);
-
-    GLint pos_attr = glGetAttribLocation(program, "position");
-    glEnableVertexAttribArray(pos_attr);
-    glVertexAttribPointer(pos_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
-    GLint time_u = glGetUniformLocation(program, "time");
+		 1.0f, -1.0f,
+		-1.0f, -1.0f,
+		-1.0f,  1.0f,
+	};
 
     LPDWORD thread_id = NULL;
     CreateThread(NULL, 0, AudioThread, NULL, 0, thread_id);
+
+	FILETIME ftime_v_old = {0};
+	FILETIME ftime_f_old = {0};
+	HANDLE vert_fd = CreateFile(VERT_FILE, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+	HANDLE frag_fd = CreateFile(FRAG_FILE, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+
+	GetFileTime(vert_fd, NULL, NULL, &ftime_v_old);
+	GetFileTime(frag_fd, NULL, NULL, &ftime_f_old);
+
+	OVERLAPPED ol = {0};
+	ReadFileEx(vert_fd, vert_file, BUF_SIZE - 1, &ol, NULL);
+	ReadFileEx(frag_fd, frag_file, BUF_SIZE - 1, &ol, NULL);
+
+    GLuint program = load_and_build_program(vert_file, frag_file);
+	
+	CloseHandle(vert_fd);
+	CloseHandle(frag_fd);
+
+	glGenVertexArrays(1, &vao);
+	glGenBuffers(1, &vbo);
 
 	bool running = true;
 	while (running) {
@@ -254,6 +269,34 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
+
+		HANDLE vert_fd = CreateFile(VERT_FILE, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+		HANDLE frag_fd = CreateFile(FRAG_FILE, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+
+		FILETIME ftime_v_cur = {0};
+		FILETIME ftime_f_cur = {0};
+		GetFileTime(vert_fd, NULL, NULL, &ftime_v_cur);
+		GetFileTime(frag_fd, NULL, NULL, &ftime_f_cur);
+		if (CompareFileTime(&ftime_v_cur, &ftime_v_old) > 0 || CompareFileTime(&ftime_f_cur, &ftime_f_old) > 0)
+			program = reload_program(program, vert_fd, frag_fd);
+		memcpy(&ftime_v_old, &ftime_v_cur, sizeof(ftime_v_old));
+		memcpy(&ftime_f_old, &ftime_f_cur, sizeof(ftime_f_old));
+		
+		CloseHandle(vert_fd);
+		CloseHandle(frag_fd);
+
+    	glUseProgram(program);
+
+		glBindVertexArray(vao);
+
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vert_buff), vert_buff, GL_STATIC_DRAW);
+
+		GLint pos_attr = glGetAttribLocation(program, "position");
+		glEnableVertexAttribArray(pos_attr);
+		glVertexAttribPointer(pos_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
+
+		GLint time_u = glGetUniformLocation(program, "time");
 
         glClear(GL_COLOR_BUFFER_BIT);
 

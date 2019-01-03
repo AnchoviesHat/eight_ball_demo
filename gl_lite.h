@@ -92,6 +92,7 @@ typedef ptrdiff_t GLsizeiptr;
     GLE(void,      LinkProgram,             GLuint program) \
     GLE(void,      ShaderSource,            GLuint shader, GLsizei count, const GLchar* const *string, const GLint *length) \
     GLE(void,      UseProgram,              GLuint program) \
+    GLE(GLuint,    DeleteProgram,           GLuint program) \
     GLE(void,      GenVertexArrays,         GLsizei n, GLuint *arrays) \
     GLE(void,      BindVertexArray,         GLuint array) \
     GLE(void,      VertexAttribPointer,     GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid * pointer) \
